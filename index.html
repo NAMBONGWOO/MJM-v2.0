@@ -617,6 +617,31 @@ margin:1rem 0;position:relative}
             </table>
           </div>
         </div>
+
+        <div class="card" style="margin-top:1.25rem">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+            <div class="section-label" style="margin-bottom:0">전체 회원 등급 관리</div>
+            <div class="search-box" style="min-width:160px">
+              <span>🔍</span>
+              <input type="text" placeholder="이름 검색..." id="admin-member-search" oninput="filterAdminMembers()">
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="admin-members-table">
+              <thead>
+                <tr>
+                  <th>이름</th>
+                  <th>이메일</th>
+                  <th>현재 등급</th>
+                  <th>등급 변경</th>
+                </tr>
+              </thead>
+              <tbody id="admin-members-tbody">
+                <tr><td colspan="4" style="text-align:center;color:var(--text-light);padding:2rem">회원 목록을 불러오는 중...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <!-- ── 내 프로필 ── -->
@@ -730,13 +755,12 @@ import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateD
 // ── Firebase 설정 ──────────────────────────────
 // TODO: Firebase Console > 프로젝트 설정 > 앱 추가 후 아래 값 교체
 const firebaseConfig = {
-  apiKey: "AIzaSyDop-A_ucD7bPh22mQBFVO1WD7O0--Y1Ho",
-  authDomain: "mjm-v2.firebaseapp.com",
-  projectId: "mjm-v2",
-  storageBucket: "mjm-v2.firebasestorage.app",
-  messagingSenderId: "125222050588",
-  appId: "1:125222050588:web:e7afdb0ed8afa5f929b8d9",
-  measurementId: "G-B34METL332"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "mjm-join.firebaseapp.com",
+  projectId: "mjm-join",
+  storageBucket: "mjm-join.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -849,6 +873,7 @@ function loadAllData(){
   loadNotices();
   loadMembers();
   loadEvents();
+  loadAdminMembers();
 }
 
 // 공지사항
@@ -1045,6 +1070,72 @@ window.approveUser = async (uid) => {
   await updateDoc(doc(db,'users',uid), {approved:true, role:'member'});
   showToast('회원이 승인되었습니다');
   loadPending();
+  loadAdminMembers();
+};
+
+// ── 전체 회원 등급 관리 ──────────────────────
+let allMembersForAdmin = [];
+
+function loadAdminMembers(){
+  if(!currentUserData||currentUserData.role!=='admin') return;
+  getDocs(collection(db,'users')).then(snap=>{
+    allMembersForAdmin = snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderAdminMembers(allMembersForAdmin);
+  });
+}
+
+const ROLE_LABEL = {admin:'관리자', manager:'운영진', member:'일반회원', pending:'승인대기'};
+const ROLE_CLASS = {admin:'관리자', manager:'운영진', member:'일반', pending:'일반'};
+
+function renderAdminMembers(members){
+  const tbody = document.getElementById('admin-members-tbody');
+  if(!members.length){
+    tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--text-light);padding:2rem">회원이 없습니다</td></tr>';
+    return;
+  }
+  tbody.innerHTML = members.map(m=>{
+    const isSelf = currentUser && m.uid === currentUser.uid;
+    return `<tr>
+      <td style="font-weight:500">${m.name||'-'}</td>
+      <td style="color:var(--text-light);font-size:0.82rem">${m.email||''}</td>
+      <td>
+        <span class="role-tag role-${ROLE_CLASS[m.role]||'일반'}">
+          ${ROLE_LABEL[m.role]||m.role}
+        </span>
+      </td>
+      <td>
+        ${isSelf
+          ? '<span style="font-size:0.78rem;color:var(--text-light)">본인 계정</span>'
+          : `<select onchange="changeRole('${m.id}', this.value)"
+               style="font-size:0.82rem;padding:5px 8px;border:1px solid var(--cream-dark);
+               border-radius:6px;background:var(--cream);color:var(--text);cursor:pointer;outline:none">
+              <option value="member"  ${m.role==='member' ?'selected':''}>일반회원</option>
+              <option value="manager" ${m.role==='manager'?'selected':''}>운영진</option>
+              <option value="admin"   ${m.role==='admin'  ?'selected':''}>관리자</option>
+              <option value="pending" ${m.role==='pending'?'selected':''}>승인대기</option>
+            </select>`
+        }
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+window.filterAdminMembers = () => {
+  const q = document.getElementById('admin-member-search').value.toLowerCase();
+  renderAdminMembers(
+    allMembersForAdmin.filter(m=>
+      (m.name||'').toLowerCase().includes(q)||(m.email||'').toLowerCase().includes(q)
+    )
+  );
+};
+
+window.changeRole = async (uid, newRole) => {
+  const approved = newRole !== 'pending';
+  await updateDoc(doc(db,'users',uid), {role: newRole, approved});
+  allMembersForAdmin = allMembersForAdmin.map(m=>m.id===uid?{...m,role:newRole,approved}:m);
+  renderAdminMembers(allMembersForAdmin);
+  showToast(`"${ROLE_LABEL[newRole]}"(으)로 등급이 변경되었습니다`);
+  loadPending();
 };
 
 // ── 공지 작성 ────────────────────────────────
@@ -1134,6 +1225,7 @@ window.navigate = (pageId, navEl) => {
   if(page) page.classList.add('active');
   if(navEl) navEl.classList.add('active');
   document.getElementById('topbar-title').textContent = PAGE_TITLES[pageId]||pageId;
+  if(pageId==='admin') { loadPending(); loadAdminMembers(); }
   closeSidebar();
 };
 
