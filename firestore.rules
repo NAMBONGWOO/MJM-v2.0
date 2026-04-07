@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── 헬퍼 함수 ──────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function currentUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && currentUser().role == 'admin';
+    }
+
+    function isManager() {
+      return isSignedIn() && (currentUser().role == 'admin' || currentUser().role == 'manager');
+    }
+
+    function isApprovedMember() {
+      return isSignedIn() && currentUser().approved == true;
+    }
+
+    // ── users 컬렉션 ────────────────────────────────────────
+    match /users/{userId} {
+      // 본인 또는 관리자만 읽기
+      allow read: if isSignedIn() && (request.auth.uid == userId || isManager());
+      // 회원 목록 조회 (운영진 이상)
+      allow list: if isManager();
+      // 신규 가입 자동 생성
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      // 본인 정보 수정 (role, approved 필드 제외)
+      allow update: if isSignedIn() && request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role','approved','uid']);
+      // 관리자는 모든 필드 수정 가능
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── notices 컬렉션 ─────────────────────────────────────
+    match /notices/{noticeId} {
+      allow read: if isApprovedMember();
+      allow create: if isManager();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── events 컬렉션 ──────────────────────────────────────
+    match /events/{eventId} {
+      allow read: if isApprovedMember();
+      allow create: if isManager();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── settings 컬렉션 ────────────────────────────────────
+    match /settings/{docId} {
+      allow read: if isApprovedMember();
+      allow write: if isAdmin();
+    }
+  }
+}
